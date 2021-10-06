@@ -1,24 +1,22 @@
+import json 
 import os
 import requests
 from bs4 import BeautifulSoup as BS
 from fake_useragent import UserAgent
 import statistics
-import numpy as np
 from outliers import smirnov_grubbs as grubbs
 import time
-start_time = time.time()
-
+# start_time = time.time()
+import numpy as np
+from npEncoder import NpEncoder
 
 useragent = UserAgent(verify_ssl=False)
 
 HEADERS = {'user-agent': useragent.random}
-INPUT_PERCENT = 20
-INPUT_PROBEG = 300000
 
 class Kolesa:
-    
 
-    def __init__(self, model, brand, year, volume, type_engine, car_dwheel):
+    def __init__(self, model, brand, year, volume, type_engine, car_dwheel, input_percent, input_probeg):
         self.model = model,
         self.brand = brand,
         self.params = {
@@ -33,6 +31,9 @@ class Kolesa:
             'auto-car-volume[from]': volume, # обьем от
             'auto-car-volume[to]': volume #обьем до
         }
+
+        self.input_percent = input_percent
+        self.input_probeg = input_probeg
     
     def get_html(self, url):
 
@@ -48,9 +49,10 @@ class Kolesa:
         html = self.get_html(url)
 
         all_cars_quantity = html.find('button', class_ = 'js__search-form-submit').get_text().split()[1]
+
         #Если в странице только одна страница то парсить без цикла
         if self.getCountPage(url) == None:
-
+            
             print('Одна страница нашлось в этом url')
             prices_list.extend(self.getPriceScript(url))
 
@@ -64,19 +66,18 @@ class Kolesa:
                 prices_list.extend(self.getPriceScript(url))
 
         print(prices_list)
-        print(self.reject_outliers(np.array(prices_list)))
+        print(self.reject_outliers(prices_list))
 
-        print(f'Статистика на основе {len(self.reject_outliers(np.array(prices_list)))} машин')
+        rejected_data = self.reject_outliers(prices_list)
+        print(f'Статистика на основе {len(rejected_data)} машин')
 
-        rejected_data = self.reject_outliers(np.array(prices_list))
+        result_dict = {
+            'data': self.data_grouping(rejected_data),
+            'total': str(len(rejected_data))
+        }
+        return result_dict
 
-        return self.data_grouping(rejected_data)
 
-    # def reject_outliers(self, data, m = 2.):
-    #     d = np.abs(data - np.median(data))
-    #     mdev = np.median(d)
-    #     s = d/mdev if mdev else 0.
-    #     return data[s<m]
 
     def data_grouping(self, data):
         percent = 1.35
@@ -93,8 +94,17 @@ class Kolesa:
 
         return resulting_list
 
+    def is_nothing_found(self, html):
+        try:
+            result_search  = html.find('h2', class_ = 'results__info').get_text().rstrip()
+
+            return True
+
+        except AttributeError:
+            return False
+
+
     def reject_outliers(self, data):
-        data = np.array(data)
         return grubbs.test(data, alpha=0.05)
 
     def getPriceScript(self, url):
@@ -140,8 +150,8 @@ class Kolesa:
 
         desc_texts = bs4.find('div', class_ = 'a-search-description').get_text().rstrip()
         
-        min_ = INPUT_PROBEG - INPUT_PROBEG / 100 * INPUT_PERCENT
-        max_ = INPUT_PROBEG + INPUT_PROBEG / 100 * INPUT_PERCENT
+        min_ = self.input_probeg - self.input_probeg / 100 * self.input_percent
+        max_ = self.input_probeg + self.input_probeg / 100 * self.input_percent
 
 
         words = desc_texts.split()
@@ -160,16 +170,6 @@ class Kolesa:
         else:
             return False
 
-
-    # def getMeanPrice(self):
-    #     return print(f'Среднее цена: {round(statistics.mean(self.getPrice()))}')
-
-    # def getMaxPrice(self):
-    #     return print(f'Максимальное цена: {max(self.getPrice())}' )
-
-    # def getMinPrice(self):
-    #     return print(f'Минимальное цена: {min(self.getPrice())}' )
-
     def getAllprices(self, data):
 
         max_ = max(data)
@@ -181,17 +181,20 @@ class Kolesa:
     def main(self):
 
         final_data = []
+        result_dict = self.getPrice()
+        data = result_dict['data']
 
-        data = self.getPrice()
+        print(result_dict['total'])
+
         for i in data:
             final_data.append(self.getAllprices(i)) 
-        
-        return print(final_data)
+
+        result = {}
+        result['body'] = json.dumps(final_data, cls=NpEncoder)
+
+        return print(result)
         
 
-
-                  #Марка #Модель #год #обьем #двигатель #Привод
-kolesa_obj = Kolesa('bmw', 'x5', '2007', '3', '1', None)
+kolesa_obj = Kolesa('bmw', 'x5', '2007', '3', '1', None, 30, 300000)
 kolesa_obj.main()
-
-print("--- %s seconds ---" % (time.time() - start_time))
+# print("--- %s seconds ---" % (time.time() - start_time))
